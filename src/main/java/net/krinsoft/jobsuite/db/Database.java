@@ -7,6 +7,7 @@ import org.bukkit.Material;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.inventory.ItemStack;
 
+import java.io.File;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -16,6 +17,7 @@ import java.sql.Statement;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.logging.Level;
 
 /**
  * @author krinsdeath
@@ -128,7 +130,7 @@ public class Database {
                     "id INTEGER AUTO_INCREMENT, " +
                     "next_id INTEGER, " +
                     "PRIMARY KEY (id, next_id)" +
-                    ");"
+                    ")" + (type == Type.SQLite ? "" : "ENGINE = INNODB;")
             );
             state.executeUpdate("CREATE TABLE IF NOT EXISTS jobsuite_base (" +
                     "id INTEGER AUTO_INCREMENT, " +
@@ -142,7 +144,7 @@ public class Database {
                     "finished BOOLEAN DEFAULT false, " +
                     "claimed BOOLEAN DEFAULT false, " +
                     "PRIMARY KEY (id, owner, expiry, claimed) " +
-                    ");"
+                    ")" + (type == Type.SQLite ? "" : "ENGINE = INNODB;")
             );
             state.executeUpdate("CREATE TABLE IF NOT EXISTS jobsuite_items (" +
                     "item_id INTEGER AUTO_INCREMENT, " +
@@ -152,9 +154,9 @@ public class Database {
                     "type TEXT, " +
                     "amount INTEGER, " +
                     "enchanted BOOLEAN DEFAULT false, " +
-                    "PRIMARY KEY (item_id, item_entry), " +
+                    "PRIMARY KEY (item_id, item_entry, enchantment_entry), " +
                     "FOREIGN KEY (job_id) REFERENCES jobsuite_base(job_id)" +
-                    ");"
+                    ")" + (type == Type.SQLite ? "" : "ENGINE = INNODB;")
             );
             state.executeUpdate("CREATE TABLE IF NOT EXISTS jobsuite_enchantments (" +
                     "enchantment_id INTEGER AUTO_INCREMENT, " +
@@ -164,10 +166,8 @@ public class Database {
                     "enchantment INTEGER, " +
                     "power INTEGER," +
                     "PRIMARY KEY (enchantment_id), " +
-                    "FOREIGN KEY (job_id) REFERENCES jobsuite_base(job_id)," +
-                    "FOREIGN KEY (enchantment_entry) REFERENCES jobsuite_items(enchantment_entry)," +
-                    "FOREIGN KEY (item_entry) REFERENCES jobsuite_items(item_entry)" +
-                    ");"
+                    "FOREIGN KEY (job_id) REFERENCES jobsuite_base(job_id)" +
+                    ")" + (type == Type.SQLite ? "" : "ENGINE = INNODB;")
             );
             if (type == Type.MySQL) {
                 state.executeUpdate("ALTER TABLE jobsuite_base " +
@@ -182,17 +182,29 @@ public class Database {
                     }
                 }
                 try {
+                    state.executeUpdate("ALTER TABLE jobsuite_items " +
+                            "ADD INDEX (item_entry, enchantment_entry);");
+                } catch (SQLException e) {
+                    plugin.getLogger().log(Level.WARNING, e.getMessage(), e);
+                }
+                try {
                     state.executeUpdate("ALTER TABLE jobsuite_enchantments " +
-                            "ADD item_entry INTEGER NOT NULL AFTER enchantment_entry," +
-                            "ADD FOREIGN KEY (item_entry) REFERENCES jobsuite_items(item_entry); ");
+                            "ADD item_entry INTEGER NOT NULL AFTER enchantment_entry;");
                 } catch (SQLException e) {
                     if (!e.getMessage().contains("Duplicate column")) {
                         plugin.getLogger().warning("An SQLException occurred: " + e.getMessage());
                     }
                 }
+                try {
+                    state.executeUpdate("ALTER TABLE jobsuite_enchantments " +
+                            "ADD FOREIGN KEY (item_entry, enchantment_entry) REFERENCES jobsuite_items(item_entry, enchantment_entry); ");
+                } catch (SQLException e) {
+                    plugin.getLogger().log(Level.WARNING, e.getMessage(), e);
+                }
             }
         } catch (SQLException e) {
             plugin.getLogger().warning("An SQLException occurred: " + e.getMessage());
+            plugin.getLogger().log(Level.WARNING, e.getMessage(), e);
         }
     }
 
@@ -248,8 +260,8 @@ public class Database {
     public String getDatabasePath() {
         String path;
         if (type == Type.SQLite) {
-            path = "jdbc:sqlite:" + plugin.getDataFolder().toString() + "/";
-            return path += plugin.getConfig().getString("database.name", "jobsuite") + ".db";
+            path = "jdbc:sqlite:" + plugin.getDataFolder().toString() + File.separator;
+            return path += plugin.getConfig().getString("database.name", "jobsuite").replaceAll("[:./\\\\]", "") + ".db";
         } else {
             path = "jdbc:mysql://" + plugin.getConfig().getString("database.host", "localhost");
             path += ":" + plugin.getConfig().getInt("database.port", 3306);
